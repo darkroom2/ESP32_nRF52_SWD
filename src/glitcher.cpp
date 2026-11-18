@@ -11,10 +11,10 @@
 #define delay_inc_step 1
 #define width_inc_step 1
 
-uint32_t delay_max = 30000;
+uint32_t delay_max = 2368;
 uint32_t width_max = 30;
 
-uint32_t delay_start = 2000;
+uint32_t delay_start = 2368;
 uint32_t width_start = 0;
 
 uint32_t _delay_us = 0;
@@ -103,6 +103,11 @@ void set_delay(uint32_t delay_us, uint32_t delay_us_end, uint32_t power_off_dela
 uint32_t get_delay()
 {
   return _delay_us;
+}
+
+uint32_t get_delay_end()
+{
+  return _delay_us_end;
 }
 
 bool inc_delay()

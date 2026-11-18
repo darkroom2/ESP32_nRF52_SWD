@@ -41,6 +41,40 @@ Change the WiFi credentials in Web.cpp and the Pinout to your needs in the platf
 Upload the data/index.htm to the ESP32 via the ip-address/edit web editor 
 
 
+### Python machine control
+
+The host-side CLI uses only the Python standard library and keeps the ESP32 browser interface unchanged. Point `--host` at the ESP32's IP address or `swd.local`:
+
+```bash
+python tools/nrf52_swd.py --host swd.local status
+```
+
+For APPROTECT unlocking, the known-good timing is `2368` microseconds:
+
+```bash
+python tools/nrf52_swd.py --host swd.local glitch --delay 2368
+```
+
+Dump the original flash and UICR:
+
+```bash
+python tools/nrf52_swd.py --host swd.local dump --kind flash --output dumps/full_flash.bin
+python tools/nrf52_swd.py --host swd.local dump --kind uicr --output dumps/full_uicr.bin
+```
+
+Restore the original factory archive only with explicit confirmation. The CLI verifies the 512 KiB flash and 4 KiB UICR sizes and their original SHA-256 values before transmitting bytes:
+
+```bash
+python tools/nrf52_swd.py --host swd.local restore --flash dumps/full_flash.bin --uicr dumps/full_uicr.bin --confirm
+```
+
+Original archive paths and hashes:
+
+- `dumps/full_flash.bin`: 512 KiB, SHA-256 `ec3060bb5d8160296f1891a2d4d2db7882535f80779dd6fe611bf300a475d826`
+- `dumps/full_uicr.bin`: 4 KiB, SHA-256 `8cf25c59ad391780435765317039d2256cc618ff036a3c0847033c8d593e13dd`
+
+The CLI prints a SHA-256 digest for every downloaded dump. A restore must include `--confirm`; omitting it or using a wrong-size or wrong-checksum file fails before restore starts.
+
 
 ### ESP32 Glitcher schematic:
 

@@ -11,6 +11,7 @@ void set_power(bool state);
 void do_glitcher();
 void set_delay(uint32_t delay_us, uint32_t delay_us_end, uint32_t power_off_delay, uint32_t swd_wait_delay);
 uint32_t get_delay();
+uint32_t get_delay_end();
 bool inc_delay();
 void set_width(uint32_t width);
 uint32_t get_width();

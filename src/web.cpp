@@ -23,6 +23,56 @@ const char *http_username = "admin";
 const char *http_password = "admin";
 AsyncWebServer server(80);
 
+static bool api_restore_active = false;
+static uint8_t api_restore_percent = 0;
+static String api_restore_error;
+
+static void send_api_json(AsyncWebServerRequest *request, int status_code, bool ok, const char *error = nullptr)
+{
+  String body = String("{\"ok\":") + (ok ? "true" : "false");
+  if (error)
+  {
+    body += ",\"error\":\"";
+    body += error;
+    body += "\"";
+  }
+  body += "}";
+  request->send(status_code, "application/json", body);
+}
+
+static bool api_parse_uint32(AsyncWebServerRequest *request, const char *name, uint32_t default_value, uint32_t *value)
+{
+  if (!request->hasParam(name))
+  {
+    *value = default_value;
+    return true;
+  }
+
+  String text = request->getParam(name)->value();
+  if (text.length() == 0)
+  {
+    return false;
+  }
+
+  uint64_t parsed = 0;
+  for (size_t i = 0; i < text.length(); i++)
+  {
+    char c = text.charAt(i);
+    if (c < '0' || c > '9')
+    {
+      return false;
+    }
+    parsed = parsed * 10 + (uint32_t)(c - '0');
+    if (parsed > UINT32_MAX)
+    {
+      return false;
+    }
+  }
+
+  *value = (uint32_t)parsed;
+  return true;
+}
+
 unsigned long hstol(String recv)
 {
   char c[recv.length() + 1];
@@ -101,6 +151,275 @@ void init_web()
   SPIFFS.begin(true);
 
   server.addHandler(new SPIFFSEditor(SPIFFS, http_username, http_password));
+
+  server.on("/api/v1/status", HTTP_GET, [](AsyncWebServerRequest *request)
+            {
+              nrf_info_struct nrf_ufcr;
+              get_new_main_info(&nrf_ufcr);
+
+              uint8_t percent = 0;
+              bool task_active = get_task_flash(&percent);
+              bool glitch_running = get_glitcher();
+
+              const char *state = "idle";
+              if (glitch_running)
+                state = "glitch";
+              else if (api_restore_active)
+                state = "restore";
+              else if (task_active)
+                state = "dump";
+
+              String body = "{";
+              body += "\"ok\":true";
+              body += ",\"state\":\"" + String(state) + "\"";
+              body += ",\"connected\":" + String(is_nrf_connected());
+              body += ",\"flash_size\":" + String(nrf_ufcr.flash_size);
+              body += ",\"uicr_size\":4096";
+              body += ",\"glitch\":{\"running\":" + String(glitch_running ? "true" : "false");
+              body += ",\"delay\":" + String(get_delay());
+              body += ",\"delay_end\":" + String(get_delay_end());
+              body += ",\"width\":" + String(get_width()) + "}";
+              body += ",\"task\":{\"active\":" + String((task_active || api_restore_active) ? "true" : "false");
+              body += ",\"percent\":" + String(api_restore_active ? api_restore_percent : percent);
+              body += ",\"speed_kbps\":" + String(get_last_speed(), 1) + "}";
+              if (api_restore_error.length())
+              {
+                body += ",\"last_error\":\"" + api_restore_error + "\"";
+              }
+              body += "}";
+
+              request->send(200, "application/json", body);
+            });
+
+  server.on("/api/v1/glitch", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
+              uint32_t delay;
+              uint32_t delay_end;
+              uint32_t power_off;
+              uint32_t swd_wait;
+              uint32_t width;
+
+              if (!api_parse_uint32(request, "delay", 2368, &delay) ||
+                  !api_parse_uint32(request, "delay_end", 2368, &delay_end) ||
+                  !api_parse_uint32(request, "power_off", 50, &power_off) ||
+                  !api_parse_uint32(request, "swd_wait", 100, &swd_wait) ||
+                  !api_parse_uint32(request, "width", 0, &width))
+              {
+                send_api_json(request, 400, false, "invalid uint32 parameter");
+                return;
+              }
+
+              set_delay(delay, delay_end, power_off, swd_wait);
+              set_width(width);
+              set_glitcher(true);
+              request->send(202, "application/json", "{\"ok\":true,\"started\":true}");
+            });
+
+  server.on("/api/v1/dump/flash", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
+              if (get_glitcher())
+              {
+                send_api_json(request, 409, false, "glitcher is running");
+                return;
+              }
+              uint8_t percent = 0;
+              if (get_task_flash(&percent))
+              {
+                send_api_json(request, 409, false, "flash task is active");
+                return;
+              }
+              if (is_nrf_connected() != 2)
+              {
+                send_api_json(request, 409, false, "target is not unlocked");
+                return;
+              }
+
+              nrf_info_struct nrf_ufcr;
+              get_new_main_info(&nrf_ufcr);
+              if (nrf_ufcr.flash_size == 0)
+              {
+                send_api_json(request, 409, false, "flash size unknown");
+                return;
+              }
+              if (nrf_ufcr.flash_size > (SPIFFS.totalBytes() - SPIFFS.usedBytes()))
+              {
+                send_api_json(request, 507, false, "not enough free space");
+                return;
+              }
+
+              String filename = "/full_flash.bin";
+              set_read_flash(0, nrf_ufcr.flash_size, filename);
+              request->send(202, "application/json",
+                            "{\"ok\":true,\"started\":true,\"filename\":\"full_flash.bin\",\"size\":" +
+                                String(nrf_ufcr.flash_size) + "}");
+            });
+
+  server.on("/api/v1/dump/uicr", HTTP_POST, [](AsyncWebServerRequest *request)
+            {
+              if (get_glitcher())
+              {
+                send_api_json(request, 409, false, "glitcher is running");
+                return;
+              }
+              uint8_t percent = 0;
+              if (get_task_flash(&percent))
+              {
+                send_api_json(request, 409, false, "flash task is active");
+                return;
+              }
+              if (is_nrf_connected() != 2)
+              {
+                send_api_json(request, 409, false, "target is not unlocked");
+                return;
+              }
+
+              if (0x1000 > (SPIFFS.totalBytes() - SPIFFS.usedBytes()))
+              {
+                send_api_json(request, 507, false, "not enough free space");
+                return;
+              }
+
+              String filename = "/full_uicr.bin";
+              set_read_flash(0x10001000, 0x1000, filename);
+              request->send(202, "application/json",
+                            "{\"ok\":true,\"started\":true,\"filename\":\"full_uicr.bin\",\"size\":4096}");
+            });
+
+  auto register_api_restore = [](const char *url, uint32_t offset, uint32_t size)
+  {
+    server.on(url, HTTP_POST,
+              [](AsyncWebServerRequest *request)
+              {
+                if (get_glitcher())
+                {
+                  send_api_json(request, 409, false, "glitcher is running");
+                  return;
+                }
+                if (is_nrf_connected() == 0)
+                {
+                  send_api_json(request, 409, false, "nRF not connected");
+                  return;
+                }
+                if (is_nrf_connected() == 1)
+                {
+                  send_api_json(request, 409, false, "nRF is locked");
+                  return;
+                }
+                request->send(202, "application/json", "{\"ok\":true,\"started\":true}");
+              },
+              [offset, size](AsyncWebServerRequest *request, String filename, size_t index,
+                             uint8_t *data, size_t len, bool final)
+              {
+                static LoopbackStream buffer(256);
+                static uint32_t written_bytes;
+                static uint32_t restore_offset;
+                static uint32_t restore_size;
+                static bool upload_failed;
+
+                if (!index)
+                {
+                  if (get_glitcher())
+                  {
+                    api_restore_error = "glitcher is running";
+                    api_restore_active = false;
+                    upload_failed = true;
+                    return;
+                  }
+                  if (is_nrf_connected() == 0)
+                  {
+                    api_restore_error = "nRF not connected";
+                    api_restore_active = false;
+                    upload_failed = true;
+                    return;
+                  }
+                  if (is_nrf_connected() == 1)
+                  {
+                    api_restore_error = "nRF is locked";
+                    api_restore_active = false;
+                    upload_failed = true;
+                    return;
+                  }
+
+                  buffer.clear();
+                  written_bytes = 0;
+                  restore_offset = offset;
+                  restore_size = size;
+                  upload_failed = false;
+                  api_restore_error = "";
+                  api_restore_percent = 0;
+                  api_restore_active = true;
+                }
+
+                if (upload_failed)
+                {
+                  return;
+                }
+
+                size_t pos = 0;
+                while (pos < len)
+                {
+                  buffer.write(data[pos++]);
+                  if (buffer.available() >= 256)
+                  {
+                    if (written_bytes + 256 > restore_size)
+                    {
+                      api_restore_error = "restore size mismatch";
+                      api_restore_active = false;
+                      upload_failed = true;
+                      return;
+                    }
+                    uint8_t chunk[256];
+                    buffer.readBytes((char *)chunk, 256);
+                    if (nrf_write_bank(restore_offset + written_bytes, (uint32_t *)chunk, 256) != 0)
+                    {
+                      api_restore_error = "flash write failed";
+                      api_restore_active = false;
+                      upload_failed = true;
+                      return;
+                    }
+                    written_bytes += 256;
+                    api_restore_percent = restore_size ? (uint8_t)((written_bytes * 100) / restore_size) : 100;
+                  }
+                }
+
+                if (final)
+                {
+                  if (buffer.available() > 0)
+                  {
+                    uint32_t chunk_size = buffer.available();
+                    if (written_bytes + chunk_size != restore_size)
+                    {
+                      api_restore_error = "restore size mismatch";
+                      api_restore_active = false;
+                      upload_failed = true;
+                      return;
+                    }
+                    uint8_t chunk[256] = {0};
+                    buffer.readBytes((char *)chunk, chunk_size);
+                    if (nrf_write_bank(restore_offset + written_bytes, (uint32_t *)chunk, chunk_size) != 0)
+                    {
+                      api_restore_error = "flash write failed";
+                      api_restore_active = false;
+                      upload_failed = true;
+                      return;
+                    }
+                    written_bytes += chunk_size;
+                  }
+                  if (written_bytes != restore_size)
+                  {
+                    api_restore_error = "restore size mismatch";
+                    api_restore_active = false;
+                    upload_failed = true;
+                    return;
+                  }
+                  api_restore_percent = 100;
+                  api_restore_active = false;
+                }
+              });
+  };
+
+  register_api_restore("/api/v1/restore/flash", 0, 524288);
+  register_api_restore("/api/v1/restore/uicr", 0x10001000, 4096);
 
   server.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request)
             { request->send(200, "text/plain", String(ESP.getFreeHeap())); });
