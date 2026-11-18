@@ -12,6 +12,7 @@
 #include "glitcher.h"
 #include "nrf_swd.h"
 #include "swd.h"
+#include "lab_controller.h"
 
 void setup()
 {
@@ -19,6 +20,7 @@ void setup()
   delay(2000);
   swd_begin();
   glitcher_begin();
+  lab_controller_begin();
   init_web();
   Serial.printf("SWD Id: 0x%08x\r\n", nrf_begin());
 
@@ -32,6 +34,7 @@ void loop()
 #ifdef ENABLE_OTA
   ArduinoOTA.handle();
 #endif
+  lab_controller_poll();
   if (get_glitcher())
   {
     do_glitcher();

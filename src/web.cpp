@@ -78,14 +78,7 @@ void init_web()
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  Serial.printf("Connecting to WiFi %s\r\n", ssid);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print('.');
-    delay(1000);
-  }
-  Serial.print("Connected! IP address: ");
-  Serial.println(WiFi.localIP());
+  Serial.printf("WiFi connection started for %s\r\n", ssid);
 
   // Make accessible via http://swd.local using mDNS responder
   if (!MDNS.begin("swd"))
@@ -201,7 +194,6 @@ void init_web()
               {
                 String swd_cmd = request->getParam("cmd")->value();
                 String answer = "";
-
                 if (swd_cmd == "init")
                 {
                   char init_string[100] = {0};
@@ -329,7 +321,6 @@ void init_web()
               {
                 String swd_cmd = request->getParam("cmd")->value();
                 String answer = "";
-
                 if (swd_cmd == "erase_all")
                 {
                   erase_flash();
@@ -428,7 +419,6 @@ void init_web()
                 }
                 else if (new_state == "dump_full_flash")
                 {
-
                   if (get_glitcher())
                   {
                     request->send(200, "text/plain", "ERROR Glitcher is running");
@@ -461,7 +451,6 @@ void init_web()
                 }
                 else if (new_state == "dump_full_uicr")
                 {
-
                   if (get_glitcher())
                   {
                     request->send(200, "text/plain", "ERROR Glitcher is running");
@@ -494,7 +483,9 @@ void init_web()
 
   server.on(
       "/flash_file_direct", HTTP_POST, [](AsyncWebServerRequest *request)
-      { request->send(200, "text/plain", "Upload complete!"); },
+      {
+        request->send(200, "text/plain", "Upload complete!");
+      },
       [](AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
       {
         static LoopbackStream buffer(512);
@@ -663,7 +654,8 @@ void init_web()
                                                                         });
 
               response->addHeader("Content-Disposition", "attachment; filename=\"flash.bin\"");
-              request->send(response); });
+              request->send(response);
+            });
 
   server.on("/get_graph", HTTP_GET, [](AsyncWebServerRequest *request)
             {

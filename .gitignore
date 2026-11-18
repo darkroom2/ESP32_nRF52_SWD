@@ -4,3 +4,9 @@
 .clang_complete
 .gcc-flags.json
 .vscode
+lab_adc*.csv
+lab_adc*.png
+lab_results.csv
+lab_sweep*.csv
+lab_power_sweep.csv
+!lab_sweep_mosfet2350.csv

@@ -74,31 +74,14 @@
         <button onclick='send("set_glitcher?state=1")'>Enable Glitcher</button>
 		<button onclick='send("set_glitcher?state=0")'>Disable Glitcher</button>
         <br><br>
-        <button onclick='send("set_glitcher?state=dump_full_flash")'>Dump Full Flash</button>
-        <button onclick='send("set_glitcher?state=dump_full_uicr")'>Dump UICR</button>
     </section>
 
     <section>
         <h2>SWD</h2>
         <button onclick='send("set_swd?cmd=init")'>Init SWD</button>
         <button onclick='send("set_swd?cmd=lock_state")'>Read nRF Lock State</button>
-        <button onclick='send("set_swd?cmd=set_lock")'>Set nRF Lock Bit</button>
-        <button onclick='send("set_swd?cmd=erase_all")'>Erase nRF</button>
         <button onclick='send("set_swd?cmd=set_reset")'>Reset nRF</button>
         <br><br>
-
-        <label for="flash_address">Address</label>
-        <input type="text" id="flash_address" name="flash_address" value="0">
-        <label for="flash_value">Value</label>
-        <input type="text" id="flash_value" name="flash_value" value="0">
-        <button onclick='send("set_swd?cmd=read_register&address="+document.getElementById("flash_address").value)'>Read
-            nRF Register</button>
-        <button
-            onclick='send("set_swd?cmd=write_register&address="+document.getElementById("flash_address").value + "&value="+document.getElementById("flash_value").value)'>Write
-            nRF Register</button>
-        <button
-            onclick='send("set_swd?cmd=write_flash&address="+document.getElementById("flash_address").value + "&value="+document.getElementById("flash_value").value)'>Write
-            nRF Flash</button><br><br>
 
         <button onclick='send("set_swd?cmd=power_on")'>Power ON</button>
         <button onclick='send("set_swd?cmd=power_off")'>Power OFF</button>
